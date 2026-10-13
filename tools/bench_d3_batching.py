@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Standalone benchmark: one d3 request per agent vs one batched request per team.
 
-Takes real per-agent prompts (state + options) from a harness run with --d3-log-prompts and asks
+Takes real per-agent prompts (state + options) from a d3 harness run (decisions.jsonl) and asks
 for the decisions of one team (6 agents of the same step) in three ways, several rounds each:
   sequential  6 single-question requests, one after the other
   parallel    6 single-question requests at once (threads)
@@ -46,13 +46,17 @@ def main():
     url = f"{base}/v1/systemone"
 
     rows = [json.loads(line) for line in open(args.decisions)]
+    for r in rows:                            # current logs: prompt = {task, situation, options}
+        if "prompt" in r and isinstance(r["prompt"], dict):
+            r["state"] = r["prompt"]["task"] + "\n" + r["prompt"]["situation"]
+            r["options"] = r["prompt"]["options"]
     rows = [r for r in rows if r.get("strategy") == "d3" and "state" in r]
     by_step: dict = {}
     for r in rows:
         by_step.setdefault((r["step"], r["team"]), []).append(r)
     groups = [g for g in by_step.values() if len(g) >= 6][-args.rounds:]
     if not groups:
-        raise SystemExit("no step with 6 logged d3 prompts (run the harness with --d3-log-prompts)")
+        raise SystemExit("no step with 6 logged d3 prompts (run the harness with a d3 team)")
     print(f"model {model}, {len(groups)} rounds of {len(groups[0])} agents")
 
     def single(r):

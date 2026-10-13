@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+from collections import deque
 
 from harness import MOVES, VIEW, Decision, Strategy, Team
 
@@ -10,9 +11,18 @@ class Greedy(Strategy):
     """Shared team map; nearest known unclaimed gold by BFS, deliver when full, explore unseen cells."""
     name = "greedy"
 
+    @staticmethod
+    def add_arguments(parser):
+        parser.add_argument("--greedy-log-facts", action="store_true",
+                            help="log the d3 prompt facts per greedy decision (test sets for tools/d3_prompt_lab.py)")
+
     def decide(self, p: dict, team: Team) -> Decision:
         with team.lock:
-            return Decision(self._decide(p, team.memory, team.max_carry))
+            info = {}
+            if self.args.greedy_log_facts:
+                from d3 import compute_facts
+                info["facts"] = compute_facts(p, team, deque())
+            return Decision(self._decide(p, team.memory, team.max_carry), 0, info)
 
     @staticmethod
     def _decide(p, mem, max_carry):
@@ -69,5 +79,7 @@ class RandomWalker(Strategy):
 
 
 from d3 import D3Strategy  # noqa: E402  (imports harness too)
+from d3_memory import D3Memory  # noqa: E402
 
-REGISTRY: dict[str, type[Strategy]] = {"greedy": Greedy, "random": RandomWalker, "d3": D3Strategy}
+REGISTRY: dict[str, type[Strategy]] = {"greedy": Greedy, "random": RandomWalker, "d3": D3Strategy,
+                                       "d3-memory": D3Memory}

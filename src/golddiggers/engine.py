@@ -123,6 +123,9 @@ class Game:
         self.queued: dict[str, tuple[str, str | None]] = {}
         self.stats = {"generated_gold": 0, "actions": 0, "failed": 0, "impossible": 0,
                       "pushes": 0, "teleports": 0, "picks": 0, "deliveries": 0}
+        self.agent_stats = {n: {"actions": 0, "moves": 0, "picks": 0, "delivered": 0, "failed": 0,
+                                "impossible": 0, "pushed_others": 0, "got_pushed": 0, "teleports": 0}
+                            for n in self.agents}
         self.history: list[dict] = []
         self._initial_gold(c.initial_gold)
         self._perceptions = self._compute_perceptions()
@@ -328,12 +331,25 @@ class Game:
 
         for n, a in self.agents.items():
             a.last_action, a.last_result = requested[n][0], result[n]
+            st = self.agent_stats[n]
             if requested[n][0] != "skip":
                 self.stats["actions"] += 1
+                st["actions"] += 1
                 if result[n] == "failed":
                     self.stats["failed"] += 1
                 elif result[n] == "impossible":
                     self.stats["impossible"] += 1
+                if result[n] in ("failed", "impossible"):
+                    st[result[n]] += 1
+            st["moves"] += n in moved
+            st["picks"] += action[n] == "pick"
+            st["got_pushed"] += result[n] == "pushed"
+            st["teleports"] += result[n] == "teleported"
+        for e in events:
+            if e["type"] == "delivery":
+                self.agent_stats[e["agent"]]["delivered"] += e["items"]
+            elif e["type"] == "push":
+                self.agent_stats[e["pusher"]]["pushed_others"] += 1
 
         self.step_no += 1
         if self.step_no % c.gold_frequency == 0 and self.rng.random() < c.gold_probability:
@@ -468,6 +484,42 @@ class Game:
             carried[a.team] += a.items
         self.history.append({"step": self.step_no, "score": dict(self.score),
                              "carried": carried, "gold_on_map": len(self.gold)})
+
+    GRID_LEGEND = {".": "empty", "#": "obstacle", "$": "gold", "D": "depot",
+                   "A": "agent of the first team", "B": "agent of the second team"}
+
+    def grid(self) -> list[str]:
+        """The field as text rows (y = row index, x = column): . # $ D, agents A/B (on top)."""
+        n = self.config.width
+        rows = [["."] * n for _ in range(n)]
+        for x, y in self.obstacles:
+            rows[y][x] = "#"
+        for x, y in self.gold:
+            rows[y][x] = "$"
+        rows[self.depot[1]][self.depot[0]] = "D"
+        for a in self.agents.values():
+            rows[a.y][a.x] = "AB"[self.config.teams.index(a.team)]
+        return ["".join(r) for r in rows]
+
+    def statistics(self, history: bool = False) -> dict:
+        """Numbers only: score, counters, per-team and per-agent stats (for /api/stats)."""
+        teams = {}
+        for t in self.config.teams:
+            members = [a for a in self.agents.values() if a.team == t]
+            teams[t] = {"name": self.team_names[t], "score": self.score[t],
+                        "carried": sum(a.items for a in members),
+                        **{k: sum(self.agent_stats[a.name][k] for a in members)
+                           for k in next(iter(self.agent_stats.values()))}}
+        out = {"step": self.step_no, "steps": self.config.steps, "finished": self.finished,
+               "winner": self._winner(), "score": dict(self.score),
+               "gold_on_map": len(self.gold), "carried": sum(a.items for a in self.agents.values()),
+               "counters": dict(self.stats), "teams": teams,
+               "agents": {n: {"team": a.team, "pos": [a.x, a.y], "items": a.items,
+                              "last_action": a.last_action, "last_result": a.last_result,
+                              **self.agent_stats[n]} for n, a in self.agents.items()}}
+        if history:
+            out["history"] = self.history
+        return out
 
     def state(self) -> dict:
         """Full god's-eye state for the frontend."""

@@ -235,6 +235,7 @@ dependencies = [
 [package.optional-dependencies]
 agents = [
     { name = "matplotlib" },
+    { name = "pillow" },
 ]
 dev = [
     { name = "httpx" },
@@ -246,6 +247,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", marker = "extra == 'dev'" },
     { name = "matplotlib", marker = "extra == 'agents'" },
+    { name = "pillow", marker = "extra == 'agents'" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]

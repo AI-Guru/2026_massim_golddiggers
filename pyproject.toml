@@ -11,7 +11,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "httpx"]
 # client-side agent harness (agents/harness.py): report plots
-agents = ["matplotlib"]
+agents = ["matplotlib", "pillow"]
 
 [project.scripts]
 golddiggers = "golddiggers.server:main"

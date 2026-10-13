@@ -257,3 +257,17 @@ def test_team_names_api():
     assert c.post("/api/setteamname/green", json={"name": "x"}).status_code == 404
     assert c.post("/api/setteamname/blue", json={"name": "<script>"}).status_code == 422
     assert c.get("/api/state").json()["team_names"] == {"red": "greedy", "blue": "blue"}
+
+
+def test_stats_and_field_api():
+    c = TestClient(server.app)
+    c.post("/api/startgame", json={"preset": "mapc2007", "seed": 3, "steps": 20})
+    c.post("/api/act/red1", json={"action": "down"})
+    c.post("/api/stepgame")
+    s = c.get("/api/stats").json()
+    assert s["step"] == 1 and "history" not in s and set(s["teams"]) == {"red", "blue"}
+    assert s["agents"]["red1"]["actions"] == 1 and s["gold_on_map"] >= 0
+    assert len(c.get("/api/stats?history=true").json()["history"]) == 2
+    f = c.get("/api/field").json()
+    assert len(f["rows"]) == 41 and all(len(r) == 41 for r in f["rows"])
+    assert f["rows"][20][20] == "D" and sum(r.count("A") for r in f["rows"]) == 6

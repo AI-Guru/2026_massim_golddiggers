@@ -40,18 +40,7 @@
       <div class="progress"><div id="progress-bar"></div></div>
 
       <div class="panel controls">
-        <div class="row">
-          <label>preset <select id="preset"><option value="">defaults</option></select></label>
-          <label>seed <input id="seed" type="number" placeholder="random"></label>
-          <label>steps <input id="steps" type="number" placeholder="preset"></label>
-        </div>
-        <details>
-          <summary>more parameters (JSON, overrides)</summary>
-          <textarea id="params" rows="4" spellcheck="false">{}</textarea>
-          <div class="muted small" id="param-help"></div>
-        </details>
         <div class="row buttons">
-          <button id="start">start game</button>
           <button id="step">step</button>
           <button id="auto">auto-step ▶</button>
           <label class="small">every <input id="interval" type="number" value="200" min="20" step="20"> ms</label>

@@ -8,6 +8,8 @@ Game control:
   POST /api/stepgame           resolve all queued actions (missing = skip) -> step summary
   POST /api/setteamname/{team} {"name": "greedy"}: display name of a team (e.g. its strategy)
   GET  /api/state              full state for the frontend (positions, history, stats)
+  GET  /api/stats              numbers only: score, counters, per team, per agent (?history=true)
+  GET  /api/field              the field as text rows plus legend, marks and agents
   GET  /api/config             defaults, presets, action list
 
 Run: uv run golddiggers --port 8642
@@ -142,6 +144,24 @@ def state():
         if game is None:
             return {"running": False}
         return {"running": True, **game.state()}
+
+
+@app.get("/api/stats")
+def stats(history: bool = False):
+    with lock:
+        return current().statistics(history)
+
+
+@app.get("/api/field")
+def field():
+    with lock:
+        g = current()
+        return {"step": g.step_no, "width": g.config.width, "height": g.config.height,
+                "rows": g.grid(), "legend": Game.GRID_LEGEND, "depot": list(g.depot),
+                "teams": {"A": g.config.teams[0], "B": g.config.teams[1]},
+                "marks": [{"pos": list(p), "value": v} for p, v in sorted(g.marks.items())],
+                "agents": [{"name": a.name, "team": a.team, "pos": [a.x, a.y], "items": a.items}
+                           for a in g.agents.values()]}
 
 
 @app.get("/api/config")

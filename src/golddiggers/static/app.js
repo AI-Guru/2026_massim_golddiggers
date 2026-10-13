@@ -165,7 +165,7 @@ function drawFog(W, H, cs) {
 }
 
 function renderPanel() {
-  if (!state.running) { $("status").textContent = "no game running: start one"; return; }
+  if (!state.running) { $("status").textContent = "no game running (games are started via POST /api/startgame)"; return; }
   const [t0, t1] = state.config.teams;
   $("t0name").textContent = teamLabel(t0); $("t1name").textContent = teamLabel(t1);
   document.querySelectorAll(".legend-row .team0").forEach(el => el.textContent = teamLabel(t0));
@@ -296,16 +296,6 @@ async function api(method, path, body) {
 }
 function showError(e) { const el = $("error"); el.textContent = e ? String(e.message || e) : ""; el.hidden = !e; }
 
-$("start").onclick = async () => {
-  try {
-    const params = JSON.parse($("params").value || "{}");
-    if ($("preset").value) params.preset = $("preset").value;
-    if ($("seed").value) params.seed = Number($("seed").value);
-    if ($("steps").value) params.steps = Number($("steps").value);
-    await api("POST", "/api/startgame", params);
-    showError(null); await poll();
-  } catch (e) { showError(e); }
-};
 $("step").onclick = async () => { try { await api("POST", "/api/stepgame"); showError(null); await poll(); } catch (e) { showError(e); } };
 
 let autoTimer = null;
@@ -330,9 +320,6 @@ async function poll() {
 }
 
 (async () => {
-  const cfg = await api("GET", "/api/config");
-  for (const name of Object.keys(cfg.presets)) $("preset").insertAdjacentHTML("beforeend", `<option>${name}</option>`);
-  $("param-help").textContent = "keys: " + Object.keys(cfg.defaults).join(", ");
   $("fog").onchange = renderWorld;
   await loadSprites();
   await poll();

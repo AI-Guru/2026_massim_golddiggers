@@ -35,6 +35,8 @@ All bodies and responses are JSON. Agent names are `<team><n>`, e.g. `red1`…`r
 | `POST /api/setteamname/{team}` | `{"name": "greedy"}`: a display name for the team (1-24 letters, digits, space, `_.-`). The frontend shows it as "greedy (red)". The example agents set their strategy name. |
 | `POST /api/stepgame` | Resolves all queued actions at once. Agents with nothing queued skip. Returns the step number, the score, each agent's requested action and result, and events (push, delivery, teleport). |
 | `GET /api/state` | The full world state for the frontend: obstacles, gold, agents, marks, score, stats, per-step history. |
+| `GET /api/stats` | Numbers only: step, score, winner, gold on the map, carried gold, counters (generated, delivered, picks, failed, impossible, pushes, teleports), per team and per agent (moves, picks, delivered, failed, impossible, pushed others, got pushed, teleports). `?history=true` adds per-step score/carried/gold history. |
+| `GET /api/field` | The field as text rows (`.` empty, `#` obstacle, `$` gold, `D` depot, `A`/`B` agents of the first/second team), plus legend, depot, marks and agents. |
 | `GET /api/config` | Defaults, presets and the list of actions. |
 
 FastAPI's interactive docs are at `/docs`.
@@ -103,7 +105,7 @@ Served at `/`, polling `/api/state` four times a second. It shows:
 - a score-over-time chart with a crosshair;
 - an agent table.
 
-From the controls you can start games (preset, seed, steps, and any parameter as JSON) and step manually or with auto-step.
+Games are started through the API (`POST /api/startgame`), for example by the agent harness. The frontend only watches, and can step manually or with auto-step.
 
 Sprites: the frontend uses `static/assets/<name>.png` (grass, tree, gold, depot, mark, miner0,
 miner1) when the file exists, and otherwise falls back to built-in 16×16 pixel art.
@@ -126,16 +128,82 @@ uv run python agents/harness.py --list-strategies
 uv run python agents/harness.py --start '{"preset": "mapc2007"}' --red d3 --blue greedy
 ```
 
+**Recording:** unless `--no-record` is passed, every step is saved to `steps/` in the run directory:
+- `NNNNNN.png`: the field, rendered client-side from `/api/field` with the frontend's sprites, with fog of war unless `--no-fog`.
+- `NNNNNN.json`: the server's numbers (`/api/stats`), the structured field (`/api/field`), and this step's client numbers: step wall time; per team mean/max decision time, mean/total prompt tokens, errors and the exact request bodies sent to the model; per agent action, decision time, prompt tokens, d3 probabilities and its prompt (task, situation, options).
+
+A step's files show the state at that step plus the decisions the agents took from it. An 800-step game takes about 40 MB.
+
+[tools/render_run.py](tools/render_run.py) turns a recording into frames or a video. Each frame shows the screenshot on the left. On the right are the score and counters, and charts up to that step: score, gold carried, gold on the map, decision time (log scale) and prompt length.
+
+```sh
+uv run python tools/render_run.py runs/<run> --step 120      # runs/<run>/frame_000120.png
+uv run python tools/render_run.py runs/<run> --video         # runs/<run>/video.mp4, 10 fps
+```
+
+10 fps shows one step per frame slowly enough to follow single moves, and an 800-step game becomes an 80 s video. Change it with `--fps`.
+
 Strategies ([agents/strategies.py](agents/strategies.py), registry `REGISTRY`):
 
 - `greedy`: keeps a shared team map, goes for the nearest known unclaimed gold by BFS, delivers when full, and otherwise explores the nearest unseen cell.
 - `random`: random walk, like the organizers' 2006 CLIMABot baseline. It picks up any gold it steps on and delivers it.
 - `d3` ([agents/d3.py](agents/d3.py)): every action is chosen by a d3 decision model over `/v1/systemone`.
   - It talks to `--d3-url` (default `http://192.168.0.219:11490`, the port for all d3 models). At start it asks `/v1/models` which models are served, and uses `--d3-model` or the first one listed.
-  - The model gets the agent's state as text and one choice question. Only actions possible right now are offered, and each move option says what is in the target cell and how the move changes the distance to the depot, gold and unexplored area.
-  - `--d3-sample` draws the action from the probabilities instead of taking the most likely one.
-  - `--d3-log-prompts` stores the prompts in `decisions.jsonl`.
-  - A failed model request makes that agent skip, and the error is recorded.
+  - Per decision it computes *facts* (position, carried gold, view, and for each possible action the distance to the depot, gold and unexplored area). A prompt variant (`--d3-prompt`) turns the facts into a state text and one choice question. The model decides; the strategy only computes facts.
+  - By default one request per team and step: the task text is the shared state, and each miner's situation is its own question. `--d3-no-batch` sends one request per agent.
+  - Every decision logs its facts and its prompt (task, situation, options). The step files also hold the exact request bodies. `--d3-sample` draws from the probabilities instead of taking the most likely action.
+
+- `d3-memory` ([agents/d3_memory.py](agents/d3_memory.py)): the `d3` strategy plus memory. The model still makes every move.
+  - **Remembered gold target:** a miner keeps its assigned gold until it is picked up or gone. `d3` re-matches miners to gold every step, so targets can switch when teammates move.
+  - **Split exploration:** an exploring miner gets its own unexplored target cell, at least 8 steps from its teammates' targets, and keeps it until the cell has been seen.
+  - **Prompt v5:** the goal sentence states the remembered target ("You are heading to your gold, 3 steps away.").
+  - **Routing around miners:** distances route around the miners next to an agent, so a side step shows as the way round a queue. A miner already carrying gold only targets gold within 6 steps; otherwise it delivers.
+  - It always sends one request per team, and shares the `--d3-*` options.
+
+  Fixing the first version (seed 2 against greedy):
+  - **First version, 18 : 62:** full miners queued in one lane to the depot, with 661 failed moves.
+  - **Routing around miners and delivering earlier, 41 : 62.**
+  - **No coordinates in the goal sentence, 66 : 66.** "Your gold at [12, 16]", with no own position given, made d3 move the wrong way half the time in the oscillating cases (30/60 correct; 60/60 without the coordinate). The `d3` baseline scored 54 : 60 on this map.
+
+Prompt variants, scored with d3-flash in the prompt lab (180 situations from a greedy game) and in 300-step games against `greedy` (mapc2007 preset; v3 and v4 summed over seeds 1–3):
+
+| variant | what changes | lab: sensible | tokens | game vs greedy |
+|---|---|---|---|---|
+| `v0` | original: raw distances per move, "drop one gold here" offered | 74% | 488 | 1 : 80 (4 : 71 batched) |
+| `v1` | no drop outside the depot; moves described as "closer to gold (5->4)" | 84% | 325 | – |
+| `v2` | v1 plus the current goal as a fact ("You are full: deliver to the depot.") | 95% | 337 | – |
+| `v3` | v2, but each move lists only the distances that matter for the goal | 96% | 266 | 166 : 187 |
+| `v4` (default) | v3 with team coordination: miners are matched to gold, one miner per nugget | – | 260 | 179 : 185 |
+
+What made the difference:
+- `v0` miners spent 70% of their decisions picking gold up and dropping it again on the spot, because "drop one gold item here" was offered.
+- An offered `skip` attracted the model too (about 50–90% with skip next to moves), so `skip` is offered only when no other action is possible.
+- Stating the goal as a fact, and leaving out irrelevant distances, fixed most remaining mistakes.
+- In the v3 game, 66% of gold-seeking decisions targeted the same nugget as a teammate, which led to the matching in v4.
+
+Tools:
+- [tools/d3_prompt_lab.py](tools/d3_prompt_lab.py) scores prompt variants offline. It samples logged situations by type (on depot, on gold, full, carrying some, empty with or without known gold), asks d3 in batches, and compares the answers with the sensible actions for that situation. Test sets come from any run: d3 always logs facts, and `greedy` does with `--greedy-log-facts`.
+- [tools/bench_d3_batching.py](tools/bench_d3_batching.py) compares one request per agent with one batched request per team.
+
+### Tournament
+
+[tools/tournament.py](tools/tournament.py) plays every pairing of strategies on several seeds, each from both sides. It then builds a comparison matrix from all finished runs: `runs/tournament/matrix.md`, `.json` and `.png`. Games that already exist are skipped. `--since` makes only games played after a strategy change count.
+
+```sh
+uv run python tools/tournament.py play   --strategies random,greedy,d3,d3-memory --seeds 1,2
+uv run python tools/tournament.py matrix --strategies random,greedy,d3,d3-memory
+```
+
+Result with d3-flash: 48 games of 300 steps on the mapc2007 preset (41×41), seeds 1–4, both sides. Each cell is the row strategy's wins-draws-losses against the column strategy, then the mean score row : column.
+
+| | d3-memory | greedy | d3 | random | overall win rate |
+|---|---|---|---|---|---|
+| **d3-memory** | – | 5-1-2 · 64 : 62 | 6-1-1 · 66 : 56 | 8-0-0 · 71 : 26 | 83% |
+| **greedy** | 2-1-5 · 62 : 64 | – | 4-0-4 · 60 : 60 | 8-0-0 · 66 : 23 | 60% |
+| **d3** | 1-1-6 · 56 : 66 | 4-0-4 · 60 : 60 | – | 8-0-0 · 62 : 25 | 56% |
+| **random** | 0-0-8 · 26 : 71 | 0-0-8 · 23 : 66 | 0-0-8 · 25 : 62 | – | 0% |
+
+![Comparison matrix heatmap](docs/tournament_matrix.png)
 
 A new strategy subclasses `harness.Strategy`. It implements `decide(perception, team) -> Decision(action, prompt_tokens)` and is added to `REGISTRY`. While touching `team.memory`, hold `team.lock`, but not while waiting for a model.
 

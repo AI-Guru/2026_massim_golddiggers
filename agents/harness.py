@@ -4,9 +4,12 @@
 Each step, every agent runs perceive -> decide -> act in its own thread (so decision-model requests
 overlap), then the harness calls /api/stepgame. Per decision it records the decision time (wall
 time of Strategy.decide, including any model request) and the prompt length in tokens (0 for
-strategies without a model). When the run ends (game over or Ctrl+C) it prints mean/std per agent
-and per team and writes runs/<time>_<red>-vs-<blue>/ with decisions.jsonl, summary.json and
-report.png (decision time and prompt length distributions per agent, score over time).
+strategies without a model). Every step it records steps/NNNNNN.png (the field) and
+steps/NNNNNN.json (server numbers, structured field, client numbers) unless --no-record; render
+frames or a video from them with tools/render_run.py. When the run ends (game over or Ctrl+C) it
+prints mean/std per agent and per team and writes runs/<time>_<red>-vs-<blue>/ with meta.json,
+decisions.jsonl, summary.json and report.png (decision time and prompt length distributions per
+agent, score over time).
 
 Usage (from golddiggers/):
   uv run --extra agents python agents/harness.py --start '{"preset": "mapc2007"}' --red greedy --blue random
@@ -97,8 +100,9 @@ class TeamMemory:
                 queue.append(n)
         return None, None
 
-    def distances(self, goal_test, allow_depot: bool) -> dict:
-        """Multi-source BFS from all goal cells: cell -> steps to the nearest goal."""
+    def distances(self, goal_test, allow_depot: bool, blocked=frozenset()) -> dict:
+        """Multi-source BFS from all goal cells: cell -> steps to the nearest goal.
+        blocked: extra cells to route around (e.g. cells with miners next to an agent)."""
         goals = [(x, y) for x in range(self.w) for y in range(self.h)
                  if goal_test((x, y)) and (x, y) not in self.obstacles]
         dist = {g: 0 for g in goals}
@@ -107,7 +111,7 @@ class TeamMemory:
             cell = queue.popleft()
             for dx, dy in MOVES.values():
                 n = (cell[0] + dx, cell[1] + dy)
-                if (0 <= n[0] < self.w and 0 <= n[1] < self.h and n not in dist
+                if (0 <= n[0] < self.w and 0 <= n[1] < self.h and n not in dist and n not in blocked
                         and n not in self.obstacles and (allow_depot or n != self.depot)):
                     dist[n] = dist[cell] + 1
                     queue.append(n)
@@ -157,10 +161,54 @@ def mean_std(values):
     return statistics.fmean(values), (statistics.stdev(values) if len(values) > 1 else 0.0)
 
 
+class Recorder:
+    """Per step: steps/NNNNNN.png (field rendered from /api/field) and steps/NNNNNN.json with the
+    server's numbers (/api/stats), the structured field and this step's client-side numbers.
+    A step's files show the state at that step plus the decisions the agents took from it."""
+
+    def __init__(self, out: Path, url: str, fog: bool):
+        from field_render import FieldRenderer
+        self.dir = out / "steps"
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.url, self.fog = url, fog
+        self.renderer = FieldRenderer(url)
+
+    def record(self, step: int, decisions: list[dict], wall_ms: float | None):
+        stats = call(self.url, "GET", "/api/stats")
+        field = call(self.url, "GET", "/api/field")
+        teams = {}
+        for t in stats["teams"]:
+            mine = [d for d in decisions if d["team"] == t]
+            teams[t] = {"decisions": len(mine),
+                        "ms_mean": round(mean_std([d["ms"] for d in mine])[0], 2),
+                        "ms_max": round(max((d["ms"] for d in mine), default=0), 2),
+                        "tokens_mean": round(mean_std([d["prompt_tokens"] for d in mine])[0], 1),
+                        "tokens_sum": sum(d["prompt_tokens"] for d in mine),
+                        "errors": sum(1 for d in mine if "error" in d)}
+            requests = []                        # the exact request bodies (one per team when batched)
+            for d in mine:
+                if "request" in d and d["request"] not in requests:
+                    requests.append(d["request"])
+            if requests:
+                teams[t]["requests"] = requests
+        client = {"step_wall_ms": round(wall_ms, 1) if wall_ms is not None else None, "teams": teams,
+                  "agents": {d["agent"]: {k: d[k] for k in ("action", "ms", "prompt_tokens", "strategy")}
+                             | {k: d[k] for k in ("probabilities", "prompt", "prompt_variant", "model", "error")
+                                if k in d}
+                             for d in decisions}}
+        self.renderer.render(field, fog=self.fog).save(self.dir / f"{step:06d}.png")
+        (self.dir / f"{step:06d}.json").write_text(json.dumps(
+            {"step": step, "server": stats, "field": field, "client": client}))
+
+
 class Run:
     def __init__(self, args, strategies: dict[str, Strategy]):
         self.args = args
         self.strategies = strategies                       # team -> Strategy
+        names = "-vs-".join(s.name for s in strategies.values())
+        self.out = RUNS / f"{datetime.now():%Y%m%d-%H%M%S}_{names}"
+        self.out.mkdir(parents=True, exist_ok=True)
+        self.recorder = None if args.no_record else Recorder(self.out, args.url, not args.no_fog)
         self.records: list[dict] = []
         self.records_lock = threading.Lock()
         self.history: list[dict] = []
@@ -219,7 +267,11 @@ class Run:
                          threading.Lock(), cfg["max_carry"]) for t in self.strategies}
         names = [ag["name"] for ag in self.state["agents"] if ag["team"] in self.strategies]
         self.history = list(self.state["history"])
+        (self.out / "meta.json").write_text(json.dumps(
+            {"config": cfg, "strategies": {t: s.name for t, s in self.strategies.items()},
+             "team_names": self.state.get("team_names"), "argv": sys.argv[1:]}, indent=1))
         step = self.state["step"]
+        recorded = len(self.records)          # records before this index belong to earlier steps
         team_of = {ag["name"]: ag["team"] for ag in self.state["agents"]}
         with ThreadPoolExecutor(max_workers=len(names)) as pool:
             while not self.state["finished"]:
@@ -231,6 +283,9 @@ class Run:
                           for n in names if not self.strategies[team_of[n]].batched]
                 list(pool.map(lambda task: task(), tasks))
                 wall = (time.perf_counter() - t0) * 1000
+                if self.recorder:
+                    self.recorder.record(step, self.records[recorded:], wall)
+                recorded = len(self.records)
                 if a.no_drive:                      # someone else steps
                     while (st := call(a.url, "GET", "/api/state"))["step"] == step:
                         time.sleep(0.05)
@@ -260,6 +315,7 @@ class Run:
             "score": self.state.get("score"), "step": self.state.get("step"),
             "finished": self.state.get("finished"), "winner": self.state.get("winner"),
             "strategies": {t: s.name for t, s in self.strategies.items()},
+            "versions": {t: getattr(s, "version", s.name) for t, s in self.strategies.items()},
             "config": self.state.get("config"),
             "agents": {n: {"team": rows[0]["team"], "strategy": rows[0]["strategy"], **stats(rows)}
                        for n, rows in sorted(by_agent.items(), key=lambda kv: agent_key(kv[0], order))},
@@ -279,12 +335,12 @@ class Run:
         for name, s in rows:
             print(f"{name:10} {s['strategy']:10} {s['decisions']:5}  "
                   f"{s['ms_mean']:8.1f} ± {s['ms_std']:<6.1f}  {s['tokens_mean']:8.1f} ± {s['tokens_std']:<6.1f}")
-        names = "-vs-".join(s.name for s in self.strategies.values())
-        out = RUNS / f"{datetime.now():%Y%m%d-%H%M%S}_{names}"
-        out.mkdir(parents=True, exist_ok=True)
-        with open(out / "decisions.jsonl", "w") as f:
+        out = self.out
+        if self.recorder and self.state.get("finished"):
+            self.recorder.record(self.state["step"], [], None)     # the final state
+        with open(out / "decisions.jsonl", "w") as f:     # request bodies only in the step files
             for r in self.records:
-                f.write(json.dumps(r) + "\n")
+                f.write(json.dumps({k: v for k, v in r.items() if k != "request"}) + "\n")
         summary["history"] = self.history
         (out / "summary.json").write_text(json.dumps(summary, indent=1))
         try:
@@ -378,6 +434,8 @@ def main():
     ap.add_argument("--delay", type=float, default=0.0, help="seconds to sleep after each step")
     ap.add_argument("--print-every", type=int, default=50)
     ap.add_argument("--no-drive", action="store_true", help="do not call /api/stepgame")
+    ap.add_argument("--no-record", action="store_true", help="no per-step screenshots and JSON")
+    ap.add_argument("--no-fog", action="store_true", help="recorded screenshots without fog of war")
     ap.add_argument("--list-strategies", action="store_true")
     for cls in REGISTRY.values():
         cls.add_arguments(ap)
