@@ -80,6 +80,7 @@ class RandomWalker(Strategy):
 
 from d3 import D3Strategy  # noqa: E402  (imports harness too)
 from d3_memory import D3Memory  # noqa: E402
+from memory_rules import MemoryRules  # noqa: E402
 
 REGISTRY: dict[str, type[Strategy]] = {"greedy": Greedy, "random": RandomWalker, "d3": D3Strategy,
-                                       "d3-memory": D3Memory}
+                                       "d3-memory": D3Memory, "memory-rules": MemoryRules}

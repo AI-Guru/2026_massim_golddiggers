@@ -1,0 +1,67 @@
+{
+  "model": "d3-flash",
+  "state": "You control one gold miner on a grid. Your team scores one point for each gold item you deliver: walk onto the depot while carrying gold, then drop it there. You carry at most 3 items. Good play: pick up gold you stand on, walk to known gold, deliver when you are full or no gold is near, and explore unknown areas when no gold is known.",
+  "questions": {
+    "red1": {
+      "type": "choice",
+      "criteria": {
+        "up": "step north: farther from the depot (3->4)",
+        "down": "step south: closer to the depot (3->2)",
+        "left": "step west: farther from the depot (3->4)",
+        "right": "step east: farther from the depot (3->4)"
+      },
+      "instructions": "You carry 3 of 3 gold (full).\nYou are full: deliver to the depot.\nWhich action should this miner take now?"
+    },
+    "red2": {
+      "type": "choice",
+      "criteria": {
+        "up": "step north (another miner is there): farther from your gold (1->2), closer to the depot (9->8)",
+        "down": "step south: farther from your gold (1->2), farther from the depot (9->10)",
+        "left": "step west: farther from your gold (1->2), closer to the depot (9->8)",
+        "right": "step east: closer to your gold (1->0), farther from the depot (9->10)"
+      },
+      "instructions": "You carry 1 of 3 gold.\nYou are heading to your gold, 1 steps away.\nWhich action should this miner take now?"
+    },
+    "red3": {
+      "type": "choice",
+      "criteria": {
+        "up": "step north: farther from the depot (1->2)",
+        "down": "step south: farther from the depot (1->2)",
+        "left": "step west: farther from the depot (1->2)",
+        "right": "step east (another miner is there): closer to the depot (1->0)"
+      },
+      "instructions": "You carry 3 of 3 gold (full).\nYou are full: deliver to the depot.\nWhich action should this miner take now?"
+    },
+    "red4": {
+      "type": "choice",
+      "criteria": {
+        "up": "step north: leaves the gold here",
+        "down": "step south: leaves the gold here",
+        "left": "step west: leaves the gold here",
+        "right": "step east: leaves the gold here",
+        "pick": "pick up the gold you are standing on"
+      },
+      "instructions": "You carry 0 of 3 gold.\nYou are standing on gold: pick it up.\nWhich action should this miner take now?"
+    },
+    "red5": {
+      "type": "choice",
+      "criteria": {
+        "up": "step north: farther from the depot (0->1)",
+        "down": "step south: farther from the depot (0->1)",
+        "left": "step west (another miner is there): farther from the depot (0->1)",
+        "right": "step east: farther from the depot (0->1)",
+        "drop": "drop your gold into the depot (scores)"
+      },
+      "instructions": "You carry 3 of 3 gold (full).\nYou are standing on the depot: drop your gold to score.\nWhich action should this miner take now?"
+    },
+    "red6": {
+      "type": "choice",
+      "criteria": {
+        "up": "step north: farther from the depot (7->8)",
+        "down": "step south: closer to the depot (7->6)",
+        "left": "step west: farther from the depot (7->8)"
+      },
+      "instructions": "You carry 3 of 3 gold (full).\nYou are full: deliver to the depot.\nWhich action should this miner take now?"
+    }
+  }
+}
