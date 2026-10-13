@@ -1,0 +1,8 @@
+.venv
+build
+tests
+agents
+tools
+**/__pycache__
+.pytest_cache
+.env

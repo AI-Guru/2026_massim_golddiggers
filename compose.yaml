@@ -1,0 +1,7 @@
+services:
+  golddiggers:
+    build: .
+    image: golddiggers
+    ports:
+      - "8642:8642"
+    restart: unless-stopped

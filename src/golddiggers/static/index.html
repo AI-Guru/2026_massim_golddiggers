@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gold Diggers</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Silkscreen&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Gold Diggers</h1>
+    <div id="status" class="muted">no game running</div>
+  </header>
+
+  <main>
+    <section class="world">
+      <div class="world-frame"><canvas id="world" width="600" height="600"></canvas>
+        <div id="cell-tip" class="tip" hidden></div>
+      </div>
+      <div class="legend-row">
+        <span><i class="sw" data-sprite="miner0"></i><span class="team0">team</span></span>
+        <span><i class="sw" data-sprite="miner1"></i><span class="team1">team</span></span>
+        <span><i class="sw" data-sprite="gold"></i>gold</span>
+        <span><i class="sw" data-sprite="depot"></i>depot</span>
+        <span><i class="sw" data-sprite="tree"></i>obstacle</span>
+        <span><i class="sw" data-sprite="mark"></i>mark</span>
+        <span class="muted">dots above a miner = carried gold</span>
+        <label>fog of war <select id="fog"><option value="all">both teams</option><option value="off">off</option></select></label>
+      </div>
+    </section>
+
+    <aside>
+      <div class="scoreboard">
+        <div class="team-score"><span class="label team0" id="t0name">–</span><span class="hero" id="t0score">0</span></div>
+        <div class="vs">:</div>
+        <div class="team-score right"><span class="label team1" id="t1name">–</span><span class="hero" id="t1score">0</span></div>
+      </div>
+      <div class="progress"><div id="progress-bar"></div></div>
+
+      <div class="panel controls">
+        <div class="row">
+          <label>preset <select id="preset"><option value="">defaults</option></select></label>
+          <label>seed <input id="seed" type="number" placeholder="random"></label>
+          <label>steps <input id="steps" type="number" placeholder="preset"></label>
+        </div>
+        <details>
+          <summary>more parameters (JSON, overrides)</summary>
+          <textarea id="params" rows="4" spellcheck="false">{}</textarea>
+          <div class="muted small" id="param-help"></div>
+        </details>
+        <div class="row buttons">
+          <button id="start">start game</button>
+          <button id="step">step</button>
+          <button id="auto">auto-step ▶</button>
+          <label class="small">every <input id="interval" type="number" value="200" min="20" step="20"> ms</label>
+        </div>
+        <div id="error" class="error" hidden></div>
+      </div>
+
+      <div class="tiles" id="tiles"></div>
+
+      <div class="panel">
+        <h2>Score over time</h2>
+        <div class="chart-wrap">
+          <svg id="chart" viewBox="0 0 400 180" preserveAspectRatio="none" role="img" aria-label="Score per team over simulation steps"></svg>
+          <div id="chart-tip" class="tip" hidden></div>
+        </div>
+        <div class="chart-legend" id="chart-legend"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Agents</h2>
+        <table id="agents"><thead><tr><th>agent</th><th>pos</th><th>gold</th><th>last action</th><th>result</th><th>queued</th></tr></thead><tbody></tbody></table>
+      </div>
+    </aside>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
